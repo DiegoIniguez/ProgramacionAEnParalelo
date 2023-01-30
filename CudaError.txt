@@ -1,0 +1,44 @@
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <time.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <iostream>
+
+// h - host - cpu 
+// g - global - gpu
+
+using namespace std;
+
+// Errors
+
+__host__ void check_CUDA_error(const char* e) {
+    cudaError_t error;
+    cudaDeviceSynchronize();
+    error = cudaGetLastError();
+
+    if (error != cudaSuccess) {
+        printf("\nERROR %d: %s (%s)", error, cudaGetErrorString(error), e);
+    }
+}
+
+__global__ void flipVector()
+{
+    printf("threadx - x: %d, y: %d, z: %d\n",threadIdx.x,threadIdx.y,threadIdx.z);
+    printf("blockidx - x: %d, y: %d, z: %d\n", blockIdx.x, blockIdx.y, blockIdx.z);
+    printf("gridDim - x: %d, y: %d, z: %d\n", gridDim.x, gridDim.y, gridDim.z);
+}
+
+int main() {
+
+    dim3 grid(4, 4, 4);
+    dim3 block(2, 2, 2);
+
+    flipVector << <grid, block >> > ();
+    check_CUDA_error("Error on kernels launch");
+    cudaDeviceSynchronize();
+    cudaDeviceReset();
+
+
+    return 0;
+}
