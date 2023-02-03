@@ -1,0 +1,150 @@
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <time.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <iostream>
+
+using namespace std;
+
+// h - host
+// g - global
+
+__host__ void check_CUDA_error(const char* e){
+    cudaError_t error;
+    cudaDeviceSynchronize();
+    error = cudaGetLastError();
+    if (error != cudaSuccess){
+
+        printf("\nERROR %d: %s (%s)", error, cudaGetErrorString(error), e);
+    }
+}
+
+__global__ void idx_calc_gid3D(int* a){
+    int totalThreads = blockDim.x * blockDim.y * blockDim.z;
+
+    int tid = threadIdx.x //ID
+        + threadIdx.y * blockDim.x //2D
+        + threadIdx.z * blockDim.x * blockDim.y; //3D
+
+    int bid = blockIdx.x //ID
+        + blockIdx.y * gridDim.x //2D
+        + blockIdx.z * gridDim.x * gridDim.y; //3D
+
+    int gid = tid + bid * totalThreads; //threadIdx + offset
+
+    printf("Gid: %d, values: %d\n", gid, a[gid]);
+
+
+}
+
+__global__ void sum_array_gpu3D(int* a, int* b, int* c, int size){
+    int totalThreads = blockDim.x * blockDim.y * blockDim.z;
+
+    int tid = threadIdx.x //ID
+        + threadIdx.y * blockDim.x //2D
+        + threadIdx.z * blockDim.x * blockDim.y; //3D
+
+    int bid = blockIdx.x //ID
+        + blockIdx.y * gridDim.x //2D
+        + blockIdx.z * gridDim.x * gridDim.y; //3D
+
+    int gid = tid + bid * totalThreads; //threadIdx + offset
+
+    if (gid<size){
+        c[gid] = a[gid] + b[gid];
+    }
+    printf("Gid: %d, values: %d\n", gid, c[gid]);
+}
+
+void sum_array_cpu3D(int* a, int* b, int* c, int size) {
+
+    for (int x = 0; x < size; x++){
+
+        c[x] = a[x] + b[x];
+    }
+
+}
+
+int main() {
+
+    const int num = 100000;
+    int size = sizeof(int) * num;
+
+    int* a = (int*)malloc(size);
+    int* b = (int*)malloc(size);
+    int* c = (int*)malloc(size);
+
+    int* c_gpu_R = (int*)malloc(size);
+    ///
+    int* d_a;
+    int* d_b;
+    int* d_c;
+    ///
+
+    for (int x = 0; x < num; x++) {
+        a[x] = x;
+        b[x] = x;
+    }
+
+    cudaMalloc(&d_a, size);
+    cudaMalloc(&d_b, size);
+    cudaMalloc(&d_c, size);
+
+    cudaMemcpy(d_a, a, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_b, b, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_c, c, size, cudaMemcpyHostToDevice);
+    ///////
+    dim3 gridGid3D(2, 2, 2); //128
+    dim3 blockGid3D(2, 2, 2); //10000
+    clock_t gpu_s, gpu_e;
+
+    printf("GID 3D\n");
+
+    idx_calc_gid3D << <gridGid3D, blockGid3D >> > (d_a);
+    check_CUDA_error("Kernel launch error");
+    cudaDeviceSynchronize();
+
+    ///////
+    dim3 gridGid3DSuma(5, 4, 4); //5 * 4 * 4 = 80 -> 10000/80 = 125
+    dim3 blockGid3DSuma(32, 2, 2); //32 * 2 * 2 = 128
+
+    printf("\nADD 3D\n");
+    gpu_s = clock();
+    sum_array_gpu3D << <gridGid3DSuma, blockGid3DSuma >> > (d_a, d_b, d_c, n);
+    check_CUDA_error("Kernel launch error");
+    cudaDeviceSynchronize();
+    gpu_e = clock();
+
+    double cps_fpu = (double)((double)(gpu_e - gpu_s) / CLOCKS_PER_SEC);
+
+    printf("time: %8f", cps_fpu);
+
+    //device to host//
+
+    cudaMemcpy(c_gpu_R, d_c, size, cudaMemcpyDeviceToHost);
+
+    sum_array_cpu3D(a, b, c, num);
+
+    for (int x = 0; x < num; x++) {
+        if (c_gpu_R[x] != c[x])
+        {
+            cout << "\nERROR HERE\n\n";
+            return(0);
+        }
+    }
+
+
+
+    cudaFree(d_a);
+    cudaFree(d_b);
+    cudaFree(d_c);
+
+    free(a);
+    free(b);
+    free(c);
+    free(c_gpu_R);
+    cudaDeviceReset();
+
+    return 0;
+}
