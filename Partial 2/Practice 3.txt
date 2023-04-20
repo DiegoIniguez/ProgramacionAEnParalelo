@@ -1,0 +1,84 @@
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <random>
+#include <iostream>
+#include <time.h>
+
+void sort(int* a, int n) {
+
+    for (int i = 0; i < n - 1; i++) {
+        for (int j = 0; j < n - i - 1; j++) {
+            if (a[j] > a[j + 1]) {
+                int temp = a[j + 1];
+                a[j + 1] = a[j];
+                a[j] = temp;
+            }
+        }
+    }
+}
+__global__ void search(int* a, int n, int* position, int seeker) {
+
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (tid < n) {
+        if (a[tid] == seeker) {
+            *position = tid;
+        }
+    }
+}
+
+// h - host - cpu 
+// g - global - gpu
+
+// _ - host
+// d_ - global
+//
+
+int main() {
+    int size = 32;
+    int seek = 73;
+    int* host_a, * result, * position;
+    int* dev_a, * dev_pos;
+    host_a = (int*)malloc(size * sizeof(int));
+
+    position = (int*)malloc(sizeof(int));
+    position[0] = -1;
+
+    result = (int*)malloc(size * sizeof(int));
+
+    cudaMalloc(&dev_a, size * sizeof(int));
+    cudaMalloc(&dev_pos, sizeof(int));
+
+
+    for (int i = 0; i < size; i++) {
+        int r1 = (rand() % (256));
+        host_a[i] = r1;
+        printf("%d ", host_a[i]);
+    }
+
+    cudaMemcpy(dev_a, host_a, size * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_pos, position, sizeof(int), cudaMemcpyHostToDevice);
+
+    dim3 grid(size >= 1024 ? size / 1024 : 1);
+    dim3 block(1024);
+    search << <grid, block >> > (dev_a, size, dev_pos, seek);
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(position, dev_pos, sizeof(int), cudaMemcpyDeviceToHost);
+
+    if (position[0] == -1) {
+        printf("Could not find any matches");
+    }
+    else {
+        printf("Found match at %d position", position[0] + 1);
+    }
+
+    free(host_a);
+    free(position);
+    free(result);
+    cudaFree(dev_a);
+    cudaFree(dev_pos);
+    return 0;
+}

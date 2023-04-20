@@ -1,0 +1,144 @@
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <random>
+#include <stdio.h>
+#include <iostream>
+#include <time.h>
+
+using namespace std;
+
+__global__ void transp(int* a, int* b, int n) {
+
+    __shared__ int s[64];
+
+    int tid = threadIdx.x + threadIdx.y * blockDim.x;
+    int offsetBlock = blockIdx.x * blockDim.x * blockDim.y;
+    int offsetRow = blockIdx.y * blockDim.x * blockDim.y * gridDim.x;
+    int gid = tid + offsetBlock + offsetRow;
+
+    int row = gid / n;
+    int col = gid - row * n;
+
+    if (gid < n * n) {
+        s[row * n + col] = a[row * n + col];
+        __syncthreads();
+        b[col * n + row] = s[row * n + col];
+    }
+}
+
+__global__ void convol(int* a, int* b, int* k, int n, int m, int kernelSize) {
+
+    __shared__ int s[64];
+
+    int tid = threadIdx.x + threadIdx.y * blockDim.x;
+    int offsetBlock = blockIdx.x * blockDim.x * blockDim.y;
+    int offsetRow = blockIdx.y * blockDim.x * blockDim.y * gridDim.x;
+    int gid = tid + offsetBlock + offsetRow;
+
+    int row = gid / n;
+    int col = gid - row * n;
+
+    int add = 0;
+
+    for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+            if (row + i >= 0 && row + i < n && col + j >= 0 && col + j < n) {
+                s[(i + 1) * kernelSize + j + 1] = k[(i + 1) * kernelSize + j + 1];
+                __syncthreads();
+                add += a[(row + i) * m + col + j] * s[(i + 1) * kernelSize + j + 1];
+
+            }
+        }
+    }
+
+    b[row * m + col] = add;
+}
+
+// h - host - cpu 
+// g - global - gpu
+
+// _ - host
+// d_ - global
+//
+
+int main() {
+
+    const int sizeOfKernel = 3, n = 8, m = 8;
+
+    int* hostKernelA, * hostKernelB, * host_a, * host_b;
+    int* devKernelA, * devKernelB, * dev_a, * dev_b;
+
+    hostKernelA = (int*)malloc(sizeOfKernel * sizeOfKernel * sizeof(int));
+    hostKernelB = (int*)malloc(sizeOfKernel * sizeOfKernel * sizeof(int));
+    host_a = (int*)malloc(n * m * sizeof(int));
+    host_b = (int*)malloc(n * m * sizeof(int));
+
+    cudaMalloc(&devKernelA, sizeOfKernel * sizeOfKernel * sizeof(int));
+    cudaMalloc(&devKernelB, sizeOfKernel * sizeOfKernel * sizeof(int));
+    cudaMalloc(&dev_a, n * m * sizeof(int));
+    cudaMalloc(&dev_b, n * m * sizeof(int));
+
+    srand(time(NULL));
+
+    for (int i = 0; i < sizeOfKernel * sizeOfKernel; i++) {
+        int r1Temp = (rand() % (1));
+        hostKernelA[i] = r1Temp;
+        hostKernelB[i] = 0;
+    }
+
+    for (int i = 0; i < n * m; i++) {
+        int r1Temp = (rand() % (3));
+        host_a[i] = r1Temp;
+        host_b[i] = 0;
+    }
+
+
+    hostKernelA[3] = 1;
+
+    printf("Matrix: \n");
+
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < m; j++) {
+            printf("%d ", host_a[i * m + j]);
+        }
+        printf("\n");
+    }
+
+    printf("\n");
+
+    cudaMemcpy(devKernelA, hostKernelA, sizeOfKernel * sizeOfKernel * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(devKernelB, hostKernelB, sizeOfKernel * sizeOfKernel * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_a, host_a, n * m * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_b, host_b, n * m * sizeof(int), cudaMemcpyHostToDevice);
+
+    dim3 block(32, 32);
+    dim3 grid(32 / (sizeOfKernel * sizeOfKernel), 32 / (sizeOfKernel * sizeOfKernel));
+
+    transp << <grid, block >> > (devKernelA, devKernelB, sizeOfKernel);
+    cudaMemcpy(hostKernelB, devKernelB, sizeOfKernel * sizeOfKernel * sizeof(int), cudaMemcpyDeviceToHost);;
+
+    dim3 block2(32, 32);
+    dim3 grid2((64 + (n * m) - 1) / (n * m), (64 + (n * m) - 1) / (n * m));
+
+    convol << <grid2, block2 >> > (dev_a, dev_b, devKernelB, n, m, sizeOfKernel);
+    cudaMemcpy(host_b, dev_b, n * m * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+    cudaDeviceReset();
+
+
+    printf("Matrix Result: \n");
+
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < m; j++) {
+            printf("%d ", host_b[i * m + j]);
+        }
+        printf("\n");
+    }
+
+    free(hostKernelA);
+    free(hostKernelB);
+    cudaFree(devKernelA);
+    cudaFree(devKernelB);
+
+    return 0;
+}

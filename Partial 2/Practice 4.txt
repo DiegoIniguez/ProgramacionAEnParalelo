@@ -1,0 +1,139 @@
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <random>
+#include <iostream>
+#include <time.h>
+
+#define LEN 1 << 4
+struct testStruct {
+    int x;
+    int y;
+};
+
+struct arrayStruct {
+    int x[LEN];
+    int y[LEN];
+};
+
+__global__ void AOS(testStruct* in, testStruct* result, const int size) {
+    
+    int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    if (gid < size) {
+        testStruct temp = in[gid];
+        temp.x += 5;
+        temp.y += 10;
+        result[gid] = temp;
+    }
+}
+
+__global__ void SOA(arrayStruct* data, arrayStruct* result, const int size) {
+    
+    int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    if (gid < size) {
+        int tempX = data->x[gid];
+        int tempY = data->y[gid];
+
+        tempX += 4;
+        tempY += 8;
+
+        result->x[gid] = tempX;
+        result->y[gid] = tempY;
+    }
+}
+
+int main() {
+    
+    //Test AOS
+    printf("AOS\n");
+    int array_size = LEN;
+    int byte_size = sizeof(testStruct) * array_size;
+    int block_size = 32;
+
+    testStruct* h_in, * h_result;
+    h_in = (testStruct*)malloc(byte_size);
+    h_result = (testStruct*)malloc(byte_size);
+
+    for (int i = 0; i < array_size; i++) {
+        h_in[i].x = 1;
+        h_in[i].y = 2;
+    }
+
+    printf("Original Array: \n");
+
+    for (int i = 0; i < array_size; i++) {
+        printf("x: %d y: %d\n", h_in[i].x, h_in[i].y);
+    }
+
+    testStruct* d_in, * d_results;
+    cudaMalloc(& d_in, byte_size);
+    cudaMalloc(& d_results, byte_size);
+    cudaMemcpy(d_in, h_in, byte_size, cudaMemcpyHostToDevice);
+    dim3 block(block_size);
+    dim3 grid((array_size + block_size - 1) / (block.x));
+
+    AOS << <grid, block >> > (d_in,d_results,array_size);
+    cudaMemcpy(h_result, d_results, byte_size, cudaMemcpyDeviceToHost);
+
+    for (int i = 0; i < array_size; i++) {
+        printf("x: %d y: %d\n", h_result[i].x, h_result[i].y);
+    }
+
+
+    free(h_in);
+    free(h_result);
+    cudaFree(d_in);
+    cudaFree(d_results);
+
+    /////////////////////////////////////////////////////////////////////////
+
+    /*
+    //Test SOA
+    printf("SOA\n");
+    int array_size = LEN;
+    int byte_size = sizeof(arrayStruct);
+    int block_size = 32;
+
+    arrayStruct* h_in, * h_result;
+    h_in = (arrayStruct*)malloc(byte_size);
+    h_result = (arrayStruct*)malloc(byte_size);
+
+    for (int i = 0; i < array_size; i++) {
+        h_in->x[i] = 1;
+        h_in->y[i] = 2;
+    }
+
+    printf("Original Array: \n");
+
+    for (int i = 0; i < array_size; i++) {
+        printf("x: %d y: %d\n", h_in->x[i], h_in->y[i]);
+    }
+
+    arrayStruct* d_in, * d_results;
+    cudaMalloc(&d_in, byte_size);
+    cudaMalloc(&d_results, byte_size);
+
+    cudaMemcpy(d_in, h_in, byte_size, cudaMemcpyHostToDevice);
+
+    dim3 block(block_size);
+    dim3 grid((array_size + block_size - 1) / (block.x));
+
+    SOA << <grid, block >> > (d_in, d_results, array_size);
+    cudaMemcpy(h_result, d_results, byte_size, cudaMemcpyDeviceToHost);
+
+    for (int i = 0; i < array_size; i++) {
+        printf("x: %d y: %d\n", h_result->x[i], h_result->y[i]);
+    }
+
+
+    free(h_in);
+    free(h_result);
+    cudaFree(d_in);
+    cudaFree(d_results);
+    
+    */
+    return 0;
+}
